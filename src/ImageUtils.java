@@ -1,14 +1,15 @@
-package utils;
+package com.odilotid.common.util.imgOptimizer;
 
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBuffer;
-import java.awt.image.WritableRaster;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.text.DecimalFormat;
 import java.util.Iterator;
-
+import java.util.concurrent.TimeUnit;
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
@@ -23,88 +24,6 @@ public class ImageUtils {
 	public static double computeSimilarityRGB(BufferedImage img1, BufferedImage img2) throws IOException {
 		return computeSimilarityRGB_Fastest(img1, img2);
 	}
-	
-	//Naive approach
-	//Example image : 7.4 seconds to process
-	public static double computeSimilarityRGB_Slow(BufferedImage img1, BufferedImage img2) throws IOException {
-		int width1 = img1.getWidth(null);
-	    int width2 = img2.getWidth(null);
-	    int height1 = img1.getHeight(null);
-	    int height2 = img2.getHeight(null);
-	    
-	    if ((width1 != width2) || (height1 != height2)) {
-	    	throw new IOException("Images have different sizes");
-	    }
-	    
-	    double diff = 0;
-	    for (int y = 0; y < height1; y++) {
-	    	for (int x = 0; x < width1; x++) {
-				int rgb1 = img1.getRGB(x, y);
-				int rgb2 = img2.getRGB(x, y);
-				
-				int r1 = (rgb1 >> 16) & 0xff;
-				int g1 = (rgb1 >>  8) & 0xff;
-				int b1 = (rgb1      ) & 0xff;
-				int r2 = (rgb2 >> 16) & 0xff;
-				int g2 = (rgb2 >>  8) & 0xff;
-				int b2 = (rgb2      ) & 0xff;
-				
-				double deltaR = (r2-r1)/255.;
-				double deltaG = (g2-g1)/255.;
-				double deltaB = (b2-b1)/255.;				
-				
-				diff += Math.sqrt(Math.pow(deltaR, 2) + Math.pow(deltaG, 2) + Math.pow(deltaB, 2));
-	    	}
-	    }
-
-	    double maxPixDiff = Math.sqrt(3); // max diff per color component is 1. so max diff on the 3 RGB component is 1+1+1.
-	    double n = width1 * height1;
-	    double p = diff/(n*maxPixDiff);
-	    return p;
-	}
-	
-	
-	//Optimized version 1- Read Approach 5 :  http://chriskirk.blogspot.fr/2011/01/performance-comparison-of-java2d-image.html
-	//Example image : 3.7 seconds to process
-	public static double computeSimilarityRGB_Fast(BufferedImage img1, BufferedImage img2) throws IOException {
-		int width1 = img1.getWidth(null);
-	    int width2 = img2.getWidth(null);
-	    int height1 = img1.getHeight(null);
-	    int height2 = img2.getHeight(null);
-	    
-	    if ((width1 != width2) || (height1 != height2)) {
-	    	throw new IOException("Images have different sizes");
-	    }
-	    
-	    final WritableRaster raster1   = img1.getRaster();
-	    final WritableRaster raster2 = img2.getRaster();
-	    int[] pixels1 = new int[3*width1];
-	    int[] pixels2 = new int[3*width1];
-	    
-	    double diff = 0;
-	    for (int y = 0; y < height1; ++y) {
-	    	pixels1 = raster1.getPixels( 0, y, width1, 1, pixels1);
-	    	pixels2 = raster2.getPixels( 0, y, width1, 1, pixels2); 
-	    	
-	    	for (int x = 0; x < width1; ++x) {
-	    		int m = x*3;
-	    		
-				double deltaR = (pixels2[m+0] - pixels1[m+0])/255.;
-				double deltaG = (pixels2[m+1] - pixels1[m+1])/255.;
-				double deltaB = (pixels2[m+2] - pixels1[m+2])/255.;				
-				
-				diff += Math.sqrt(Math.pow(deltaR, 2) + Math.pow(deltaG, 2) + Math.pow(deltaB, 2));
-	    	}
-	    }
-
-	    double maxPixDiff = Math.sqrt(3); // max diff per color component is 1. so max diff on the 3 RGB component is 1+1+1.
-	    double n = width1 * height1;
-	    double p = diff/(n*maxPixDiff);
-	    return p;
-	}
-	
-	
-	
 	//Optimized - Read Approach 8 :  http://chriskirk.blogspot.fr/2011/01/performance-comparison-of-java2d-image.html
 	//And some personal optimization
 	//Example image : 1.2 seconds to process
@@ -131,18 +50,9 @@ public class ImageUtils {
 	    if (size == (width1 * height1 * 3)) { //RGB 24bit per pixel - 3 bytes per pixel: 1 for R, 1 for G, 1 for B
 	    	
 		    for (int i = 0; i < size; i+= 3) {
-		    	/*
-				double deltaR = (db2.getElem(i) - db1.getElem(i)) / 255.;
-				double deltaG = (db2.getElem(i+1) - db1.getElem(i+1)) / 255.;
-				double deltaB = (db2.getElem(i+2) - db1.getElem(i+2)) / 255.;				
-				
-				diff += Math.sqrt(Math.pow(deltaR, 2) + Math.pow(deltaG, 2) + Math.pow(deltaB, 2));
-				*/
-		    	
 				double deltaR = (db2.getElem(i) - db1.getElem(i));
 				double deltaG = (db2.getElem(i+1) - db1.getElem(i+1));
 				double deltaB = (db2.getElem(i+2) - db1.getElem(i+2));
-				
 				diff += Math.sqrt(((deltaR*deltaR) + (deltaG*deltaG) + (deltaB*deltaB)) / 65025.);
 		    }
 		    
@@ -164,7 +74,7 @@ public class ImageUtils {
 	
 	//JPEG Copy input image to output image with the new quality, and copy too the EXIF data from input to output!
 	public static void createJPEG(File input, File output, int quality) throws IOException {
-		FileUtils.truncateFile(output);
+		truncateFile(output);
 		
 		ImageInputStream iis = ImageIO.createImageInputStream(input);
 		Iterator<ImageReader> readers = ImageIO.getImageReaders(iis);
@@ -190,7 +100,7 @@ public class ImageUtils {
 	
 	//Save the input image as a jpeg file
 	public static void createJPEG(BufferedImage input, File output, int quality) throws IOException {
-		FileUtils.truncateFile(output);
+		truncateFile(output);
 		
 		final ImageWriter writer = ImageIO.getImageWritersByFormatName("jpg").next();
 		writer.setOutput(new FileImageOutputStream(output));
@@ -205,26 +115,22 @@ public class ImageUtils {
 		writeQualityInJPEG(output, quality);
 	}
 	
-	
 	//Special trick to read the quality in the last byte of the file (because JFIF/EXIF do not have this info)
 	public static int readQualityInJPEG(File input) throws IOException {
-		if ((input == null) || (input.exists() == false) || (input.canRead() == false)) {
+		if ((input == null) || (input.exists() == false)) {
 			return -1;
 		} else {
 			FileInputStream in = new FileInputStream(input);
+			in.getChannel().position(in.getChannel().size() - 2);
+			int b1 = in.read();
+			int b2 = in.read();
 			int quality = -1;
-			try {
-				in.getChannel().position(in.getChannel().size() - 2);
-				int b1 = in.read();
-				int b2 = in.read();
-				if ((b1 == 0xFF) && (b2 == 0xD9)) { //0xFFD9 it's the EOI (End Of Image jpeg tag), meaning JPEGOptimized does not append the quality byte
-					quality = -1;
-				} else {
-					quality = b2;
-				}
-			} finally {
-				in.close();
+			if ((b1 == 0xFF) && (b2 == 0xD9)) { //0xFFD9 it's the EOI (End Of Image jpeg tag), meaning JPEGOptimized does not append the quality byte
+				quality = -1;
+			} else {
+				quality = b2;
 			}
+			in.close();
 			return quality;
 		}
 	}
@@ -235,7 +141,34 @@ public class ImageUtils {
 		out.write(quality & 0x7F);
 		out.close();
 	}
-	
 
+	private static void truncateFile(File file) throws IOException {
+		if (file.exists()) {
+			FileOutputStream fos = new FileOutputStream(file, true);
+			FileChannel outChan = fos.getChannel();
+			outChan.truncate(0);
+			outChan.close();
+			fos.close();
+		}
+	}
+
+	public static String fileSize(long size) {
+		if(size <= 0) return "0";
+		final String[] units = new String[] { "B", "kB", "MB", "GB", "TB" };
+		int digitGroups = (int) (Math.log10(size)/Math.log10(1024));
+		return new DecimalFormat("#,##0.0#").format(size/Math.pow(1024, digitGroups)) + "" + units[digitGroups];
+	}
+
+	public static String rate(double rate) {
+		return new DecimalFormat("#0.00%").format(rate);
+	}
+
+	public static String interval(final long l)  {
+		final long hr = TimeUnit.MILLISECONDS.toHours(l);
+		final long min = TimeUnit.MILLISECONDS.toMinutes(l - TimeUnit.HOURS.toMillis(hr));
+		final long sec = TimeUnit.MILLISECONDS.toSeconds(l - TimeUnit.HOURS.toMillis(hr) - TimeUnit.MINUTES.toMillis(min));
+		final long ms = TimeUnit.MILLISECONDS.toMillis(l - TimeUnit.HOURS.toMillis(hr) - TimeUnit.MINUTES.toMillis(min) - TimeUnit.SECONDS.toMillis(sec));
+		return String.format("%02d:%02d:%02d.%03d", hr, min, sec, ms);
+	}
 	
 }
